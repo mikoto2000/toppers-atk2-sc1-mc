@@ -1,0 +1,152 @@
+/*
+ *  TOPPERS/FMP Kernel
+ *      Toyohashi Open Platform for Embedded Real-Time Systems/
+ *      Flexible MultiProcessor Kernel
+ *
+ *  Copyright (C) 2011 by Embedded and Real-Time Systems Laboratory
+ *              Graduate School of Information Science, Nagoya Univ., JAPAN
+ *
+ *  上記著作権者は，以下の(1)～(4)の条件を満たす場合に限り，本ソフトウェ
+ *  ア（本ソフトウェアを改変したものを含む．以下同じ）を使用・複製・改
+ *  変・再配布（以下，利用と呼ぶ）することを無償で許諾する．
+ *  (1) 本ソフトウェアをソースコードの形で利用する場合には，上記の著作
+ *      権表示，この利用条件および下記の無保証規定が，そのままの形でソー
+ *      スコード中に含まれていること．
+ *  (2) 本ソフトウェアを，ライブラリ形式など，他のソフトウェア開発に使
+ *      用できる形で再配布する場合には，再配布に伴うドキュメント（利用
+ *      者マニュアルなど）に，上記の著作権表示，この利用条件および下記
+ *      の無保証規定を掲載すること．
+ *  (3) 本ソフトウェアを，機器に組み込むなど，他のソフトウェア開発に使
+ *      用できない形で再配布する場合には，次のいずれかの条件を満たすこ
+ *      と．
+ *    (a) 再配布に伴うドキュメント（利用者マニュアルなど）に，上記の著
+ *        作権表示，この利用条件および下記の無保証規定を掲載すること．
+ *    (b) 再配布の形態を，別に定める方法によって，TOPPERSプロジェクトに
+ *        報告すること．
+ *  (4) 本ソフトウェアの利用により直接的または間接的に生じるいかなる損
+ *      害からも，上記著作権者およびTOPPERSプロジェクトを免責すること．
+ *      また，本ソフトウェアのユーザまたはエンドユーザからのいかなる理
+ *      由に基づく請求からも，上記著作権者およびTOPPERSプロジェクトを
+ *      免責すること．
+ *
+ *  本ソフトウェアは，無保証で提供されているものである．上記著作権者お
+ *  よびTOPPERSプロジェクトは，本ソフトウェアに関して，特定の使用目的
+ *  に対する適合性も含めて，いかなる保証も行わない．また，本ソフトウェ
+ *  アの利用により直接的または間接的に生じたいかなる損害に関しても，そ
+ *  の責任を負わない．
+ *
+ *  @(#) $Id: core_asm.inc 849 2017-09-29 13:34:39Z ertl-honda $
+ */
+
+#ifndef TOPPERS_CORE_ASM_INC
+#define TOPPERS_CORE_ASM_INC
+
+/*
+ *  ディレクティブのマクロ定義
+ */
+#define ASECTION(name) .section name,"a"
+#define ATEXT          .text
+#define AGLOBAL(name)  .global name
+#define AALIGN(x)      .align x
+#define ALONG          .long
+#define ALABEL(label)  label:
+#define AOR            |
+
+/*
+ *  セクション情報
+ */
+#define DATA_START  __data_start
+#define IDATA_START __idata_start
+#define IDATA_END   __idata_end
+#define BSS_START   __bss_start
+#define BSS_END     __bss_end
+
+#if __TARGET_ARCH_ARM >= 6
+.macro my_core_id re_reg
+	mrc p15, 0, \re_reg, c0, c0, 5 /* プロセッサIDの取得 */
+	and \re_reg, \re_reg, #0x0f    /* 下位4bitのみ有効   */
+.endm
+
+#ifdef USE_THREAD_ID_CCB
+.macro my_ccb re_reg sc_reg1
+	mrc p15, 0, \re_reg, c13, c0, 4
+.endm
+#else  /* USE_THREAD_ID_CCB */
+.macro my_ccb re_reg sc_reg1
+	mrc p15, 0, \re_reg, c0, c0, 5 /* プロセッサIDの取得 */
+	and \sc_reg1, \re_reg, #0x0f   /* 下位4bitのみ有効   */
+	ldr \re_reg, =p_ccb_table
+	ldr \re_reg, [\re_reg, \sc_reg1, asl #2]
+.endm
+#endif /* USE_THREAD_ID_CCB */
+
+.macro my_ostkpt re_reg sc_reg1
+	mrc p15, 0, \re_reg, c0, c0, 5 /* プロセッサIDの取得 */
+	and \sc_reg1, \re_reg, #0x0f   /* 下位4bitのみ有効   */
+	ldr \re_reg, =ostkpt_table
+	ldr \re_reg, [\re_reg, \sc_reg1, asl #2]
+.endm
+
+.macro dsb_inst
+#if __TARGET_ARCH_ARM == 6
+	mcr p15, 0, \reg2, c7, c10, 4
+#elif __TARGET_ARCH_ARM >= 7
+	dsb
+#endif /* __TARGET_ARCH_ARM >= 7 */
+.endm
+
+.macro dmb_inst
+#if __TARGET_ARCH_ARM == 6
+    mcr   p15, 0, r2, c7, c10, 5      /* data_memory_barrier */
+#elif __TARGET_ARCH_ARM >= 7
+    dmb
+#endif /* __TARGET_ARCH_ARM == 6 */
+.endm
+
+#endif /* __TARGET_ARCH_ARM >= 6 */
+
+
+/*
+ *  OS割込み禁止マクロ
+ *  ネストの一番外側で呼び出されることを想定している
+ */
+.macro OUTER_LOCK_OS_INT  reg, reg_myccb
+	mov  \reg, #1
+	strb \reg, [\reg_myccb, #CCB_nested_lock_os_int_cnt]
+	mrs  \reg, cpsr
+	orr  \reg, \reg, #(CPSR_OSLOCK AOR CPSR_ALWAYS_SET)
+	msr  cpsr, \reg
+.endm
+
+/*
+ *  OS割込み禁止解除マクロ
+ *  ネストの一番外側で呼び出されることを想定している
+ */
+.macro OUTER_UNLOCK_OS_INT reg, reg_myccb
+	mov  \reg, #0
+	strb \reg, [\reg_myccb, #CCB_nested_lock_os_int_cnt]
+	mrs  \reg, cpsr
+	bic  \reg, \reg, #(CPSR_OSLOCK)
+	msr  cpsr, \reg
+.endm
+
+/*
+ *  全割込み禁止マクロ
+ */
+.macro LOCK_ALL_INT reg
+	mrs  \reg, cpsr
+	orr  \reg, \reg, #(CPSR_ALLLOCK)
+	msr  cpsr, \reg
+.endm
+
+/*
+ *  全割込み禁止解除マクロ
+ */
+.macro UNLOCK_ALL_INT reg
+	mrs  \reg, cpsr
+	bic  \reg, \reg, #(CPSR_ALLLOCK)
+	msr  cpsr, \reg
+.endm
+
+
+#endif /* TOPPERS_CORE_ASM_INC */

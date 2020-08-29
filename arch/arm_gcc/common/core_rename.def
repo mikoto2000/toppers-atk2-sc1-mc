@@ -1,0 +1,13 @@
+# core_config.c
+core_initialize
+core_terminate
+initialize_exception
+default_int_handler
+dump_excframe
+
+# Os_Lcfg.c
+ostkpt_table
+isr_tbl
+isr_p_isrcb_tbl
+
+# prc_support.S
